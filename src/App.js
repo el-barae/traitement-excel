@@ -1,23 +1,187 @@
-import logo from './logo.svg';
-import './App.css';
+import { useState } from "react";
+import * as XLSX from "xlsx";
+import "./App.css"; // ajouter ce fichier CSS
 
 function App() {
+  const [data, setData] = useState([]);
+  const [villeFilters, setVilleFilters] = useState([]);
+  const [dFilters, setDFilters] = useState([]);
+
+  const parseColonne1 = (text = "") => {
+    const lignes = text.split("\n").map(l => l.trim()).filter(Boolean);
+    const titre = lignes[0] || "";
+    const lieu  = lignes[1] || "";
+    const ligneVilleTel = lignes[2] || "";
+    const ligneFax = lignes[3] || "";
+
+    const villeMatch = ligneVilleTel.match(/Ville\s*:\s*(.*?)-\s*T[ée]l\s*:\s*([^-\n]*)/i);
+    const ville = villeMatch ? villeMatch[1].trim() : "";
+    const tel   = villeMatch ? villeMatch[2].trim() : "";
+
+    const faxMatch = ligneFax.match(/Fax\s*:\s*(.*)/i);
+    const fax = faxMatch ? faxMatch[1].trim() : "";
+
+    return { titre, lieu, ville, tel, fax };
+  };
+
+  const handleFileUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const binaryStr = evt.target.result;
+      const wb = XLSX.read(binaryStr, { type: "binary" });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+      const mapped = rows
+        .slice(1)
+        .filter(r => r[1])
+        .map((r) => {
+          const col1 = r[1] || "";
+          const dRaw = r[2] || "";
+          const matricule = r[3] || "";
+
+          const { titre, lieu, ville, tel, fax } = parseColonne1(col1);
+
+          // Extraire D14(D) → garde "D14(D)" complet
+          const dList = dRaw
+            .split(",")
+            .map(x => x.trim())
+            .filter(Boolean);
+
+          return { titre, lieu, ville, tel, fax, dRaw, dList, matricule };
+        });
+
+      setData(mapped);
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const villes = Array.from(new Set(data.map(r => r.ville).filter(Boolean)));
+  const dOptions = Array.from(new Set(data.flatMap(r => r.dList)));
+
+  const toggleVille = (ville) => {
+    setVilleFilters(prev =>
+      prev.includes(ville) ? prev.filter(v => v !== ville) : [...prev, ville]
+    );
+  };
+
+  const toggleD = (d) => {
+    setDFilters(prev =>
+      prev.includes(d) ? prev.filter(x => x !== d) : [...prev, d]
+    );
+  };
+
+  const removeVille = (ville) => {
+    setVilleFilters(prev => prev.filter(v => v !== ville));
+  };
+
+  const removeD = (d) => {
+    setDFilters(prev => prev.filter(x => x !== d));
+  };
+
+  const filtered = data.filter(r =>
+    (villeFilters.length === 0 || villeFilters.includes(r.ville)) &&
+    (dFilters.length === 0 || r.dList.some(d => dFilters.includes(d)))
+  );
+
   return (
-    <div className="App">
-      <header className="App-header">
-        <img src={logo} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
+    <div className="app-container">
+      <h1>Gestion des Bureaux d'Études</h1>
+      
+      <div className="file-upload">
+        <label htmlFor="file-input" className="file-label">
+          Choisir un fichier
+        </label>
+        <input
+          id="file-input"
+          type="file"
+          accept=".xlsx,.xls"
+          onChange={handleFileUpload}
+        />
+        {data.length > 0 && <span className="file-info">{data.length} entrées chargées</span>}
+      </div>
+
+      <div className="filters-section">
+        <div className="filter-group">
+          <label>Villes</label>
+          <div className="tags-container">
+            {villeFilters.map(v => (
+              <span key={v} className="tag tag-selected">
+                {v}
+                <button onClick={() => removeVille(v)}>×</button>
+              </span>
+            ))}
+          </div>
+          <div className="options-list">
+            {villes.map(v => (
+              <button
+                key={v}
+                className={`option-btn ${villeFilters.includes(v) ? "active" : ""}`}
+                onClick={() => toggleVille(v)}
+              >
+                {v}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="filter-group">
+          <label>Catégories D</label>
+          <div className="tags-container">
+            {dFilters.map(d => (
+              <span key={d} className="tag tag-selected">
+                {d}
+                <button onClick={() => removeD(d)}>×</button>
+              </span>
+            ))}
+          </div>
+          <div className="options-list">
+            {dOptions.map(d => (
+              <button
+                key={d}
+                className={`option-btn ${dFilters.includes(d) ? "active" : ""}`}
+                onClick={() => toggleD(d)}
+              >
+                {d}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Titre</th>
+              <th>Lieu</th>
+              <th>Ville</th>
+              <th>Tél</th>
+              <th>Fax</th>
+              <th>D</th>
+              <th>Matricule</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((r, i) => (
+              <tr key={i}>
+                <td>{r.titre}</td>
+                <td>{r.lieu}</td>
+                <td>{r.ville}</td>
+                <td>{r.tel}</td>
+                <td>{r.fax}</td>
+                <td>{r.dRaw}</td>
+                <td>{r.matricule}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {filtered.length === 0 && data.length > 0 && (
+          <p className="no-results">Aucun résultat trouvé</p>
+        )}
+      </div>
     </div>
   );
 }
