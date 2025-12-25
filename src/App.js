@@ -1,11 +1,12 @@
 import { useState } from "react";
 import * as XLSX from "xlsx";
-import "./App.css"; // ajouter ce fichier CSS
+import "./App.css";
 
 function App() {
   const [data, setData] = useState([]);
   const [villeFilters, setVilleFilters] = useState([]);
   const [dFilters, setDFilters] = useState([]);
+  const [dFilterMode, setDFilterMode] = useState("avec-autres"); // "exact" ou "avec-autres"
 
   const parseColonne1 = (text = "") => {
     const lignes = text.split("\n").map(l => l.trim()).filter(Boolean);
@@ -44,7 +45,6 @@ function App() {
 
           const { titre, lieu, ville, tel, fax } = parseColonne1(col1);
 
-          // Extraire D14(D) → garde "D14(D)" complet
           const dList = dRaw
             .split(",")
             .map(x => x.trim())
@@ -59,7 +59,12 @@ function App() {
   };
 
   const villes = Array.from(new Set(data.map(r => r.ville).filter(Boolean)));
-  const dOptions = Array.from(new Set(data.flatMap(r => r.dList)));
+const dOptions = Array.from(new Set(data.flatMap(r => r.dList))).sort((a, b) => {
+  // Extraire le numéro de D3(P) → 3, D14(D) → 14
+  const numA = parseInt(a.match(/\d+/)?.[0] || "0");
+  const numB = parseInt(b.match(/\d+/)?.[0] || "0");
+  return numA - numB;
+});
 
   const toggleVille = (ville) => {
     setVilleFilters(prev =>
@@ -81,10 +86,25 @@ function App() {
     setDFilters(prev => prev.filter(x => x !== d));
   };
 
-  const filtered = data.filter(r =>
-    (villeFilters.length === 0 || villeFilters.includes(r.ville)) &&
-    (dFilters.length === 0 || r.dList.some(d => dFilters.includes(d)))
-  );
+  const filtered = data.filter(r => {
+    // Filtre par ville
+    const villeMatch = villeFilters.length === 0 || villeFilters.includes(r.ville);
+    
+    // Filtre par D selon le mode
+    let dMatch = true;
+    if (dFilters.length > 0) {
+      if (dFilterMode === "exact") {
+        // Mode exact: doit contenir UNIQUEMENT les D sélectionnés
+        dMatch = r.dList.length === dFilters.length && 
+                 r.dList.every(d => dFilters.includes(d));
+      } else {
+        // Mode avec-autres: doit contenir AU MOINS les D sélectionnés (peut avoir d'autres)
+        dMatch = dFilters.every(d => r.dList.includes(d));
+      }
+    }
+    
+    return villeMatch && dMatch;
+  });
 
   return (
     <div className="app-container">
@@ -129,6 +149,30 @@ function App() {
 
         <div className="filter-group">
           <label>Catégories D</label>
+          
+          <div className="filter-mode">
+            <label className="radio-label">
+              <input
+                type="radio"
+                name="dMode"
+                value="avec-autres"
+                checked={dFilterMode === "avec-autres"}
+                onChange={(e) => setDFilterMode(e.target.value)}
+              />
+              <span>  Contient ces D + autres possibles</span>
+            </label>
+            <label className="radio-label">
+              <input
+                type="radio"
+                name="dMode"
+                value="exact"
+                checked={dFilterMode === "exact"}
+                onChange={(e) => setDFilterMode(e.target.value)}
+              />
+              <span>  Contient uniquement ces D</span>
+            </label>
+          </div>
+
           <div className="tags-container">
             {dFilters.map(d => (
               <span key={d} className="tag tag-selected">
