@@ -282,3 +282,16 @@ td {
     font-size: 0.85rem;
   }
 }
+
+.option-btn.special-btn {
+  background: #f5f5f5;
+  border-style: dashed;
+  font-weight: 600;
+  color: #555;
+}
+
+.option-btn.special-btn:hover {
+  background: #ffe9c7;
+  border-color: #ff8c42;
+  color: #ff8c42;
+}

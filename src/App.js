@@ -5,19 +5,19 @@ import "./App.css";
 function App() {
   const [data, setData] = useState([]);
   const [villeFilters, setVilleFilters] = useState([]);
-  const [dFilters, setDFilters] = useState([]);
+  const [dFilters, setDFilters] = useState([]);        // ex: ["D3", "D14"]
   const [dFilterMode, setDFilterMode] = useState("avec-autres"); // "exact" ou "avec-autres"
 
   const parseColonne1 = (text = "") => {
     const lignes = text.split("\n").map(l => l.trim()).filter(Boolean);
     const titre = lignes[0] || "";
-    const lieu  = lignes[1] || "";
+    const lieu = lignes[1] || "";
     const ligneVilleTel = lignes[2] || "";
     const ligneFax = lignes[3] || "";
 
     const villeMatch = ligneVilleTel.match(/Ville\s*:\s*(.*?)-\s*T[ée]l\s*:\s*([^-\n]*)/i);
     const ville = villeMatch ? villeMatch[1].trim() : "";
-    const tel   = villeMatch ? villeMatch[2].trim() : "";
+    const tel = villeMatch ? villeMatch[2].trim() : "";
 
     const faxMatch = ligneFax.match(/Fax\s*:\s*(.*)/i);
     const fax = faxMatch ? faxMatch[1].trim() : "";
@@ -48,7 +48,7 @@ function App() {
           const dList = dRaw
             .split(",")
             .map(x => x.trim())
-            .filter(Boolean);
+            .filter(Boolean);      // ex: ["D14(D)", "D15(P)"]
 
           return { titre, lieu, ville, tel, fax, dRaw, dList, matricule };
         });
@@ -58,13 +58,34 @@ function App() {
     reader.readAsBinaryString(file);
   };
 
-  const villes = Array.from(new Set(data.map(r => r.ville).filter(Boolean)));
-const dOptions = Array.from(new Set(data.flatMap(r => r.dList))).sort((a, b) => {
-  // Extraire le numéro de D3(P) → 3, D14(D) → 14
+// 1) Formes complètes uniques D14(P), D14(D)...
+const dFullOptions = Array.from(
+  new Set(data.flatMap(r => r.dList))
+).sort((a, b) => {
   const numA = parseInt(a.match(/\d+/)?.[0] || "0");
   const numB = parseInt(b.match(/\d+/)?.[0] || "0");
   return numA - numB;
 });
+
+// 2) Numéros uniques 1, 2, 3, ... n
+const dNumbers = Array.from(
+  new Set(
+    data
+      .flatMap(r => r.dList)
+      .map(d => parseInt(d.match(/\d+/)?.[0] || "0"))
+      .filter(n => !Number.isNaN(n) && n > 0)
+  )
+).sort((a, b) => a - b);
+
+// 3) Options Dn (D1, D2, ... Dn)
+const dNumberOptions = dNumbers.map(n => `D${n}`);
+
+// 4) Liste finale dOptions : d’abord D1, D2, ... puis D3(P), D3(D)...
+const dOptions = [...dNumberOptions, ...dFullOptions];
+
+
+  // ---- Villes uniques ----
+  const villes = Array.from(new Set(data.map(r => r.ville).filter(Boolean)));
 
   const toggleVille = (ville) => {
     setVilleFilters(prev =>
@@ -86,30 +107,60 @@ const dOptions = Array.from(new Set(data.flatMap(r => r.dList))).sort((a, b) => 
     setDFilters(prev => prev.filter(x => x !== d));
   };
 
+  // ---- Filtrage ----
   const filtered = data.filter(r => {
-    // Filtre par ville
-    const villeMatch = villeFilters.length === 0 || villeFilters.includes(r.ville);
-    
-    // Filtre par D selon le mode
-    let dMatch = true;
-    if (dFilters.length > 0) {
-      if (dFilterMode === "exact") {
-        // Mode exact: doit contenir UNIQUEMENT les D sélectionnés
-        dMatch = r.dList.length === dFilters.length && 
-                 r.dList.every(d => dFilters.includes(d));
-      } else {
-        // Mode avec-autres: doit contenir AU MOINS les D sélectionnés (peut avoir d'autres)
-        dMatch = dFilters.every(d => r.dList.includes(d));
-      }
+  const villeMatch =
+    villeFilters.length === 0 || villeFilters.includes(r.ville);
+
+  let dMatch = true;
+  if (dFilters.length > 0) {
+    // séparer filtres "numéro pur" (D3) et filtres "complets" (D3(P))
+    const numFilters = dFilters
+      .filter(f => !/\(P\)|\(D\)/i.test(f))    // D3, D14...
+      .map(f => f.match(/\d+/)?.[0])
+      .filter(Boolean);
+
+    const fullFilters = dFilters.filter(f => /\(P\)|\(D\)/i.test(f)); // D3(P), D14(D)...
+
+    const rowNums = r.dList
+      .map(d => d.match(/\d+/)?.[0])
+      .filter(Boolean);
+
+    if (dFilterMode === "exact") {
+      // exact sur les numéros (pour Dn) + exact sur les formes complètes
+      const rowNumSet = Array.from(new Set(rowNums)).sort();
+      const numFilterSet = Array.from(new Set(numFilters)).sort();
+
+      const exactNums =
+        numFilters.length === 0 ||
+        (rowNumSet.length === numFilterSet.length &&
+          rowNumSet.every((n, i) => n === numFilterSet[i]));
+
+      const exactFull =
+        fullFilters.length === 0 ||
+        (r.dList.length === fullFilters.length &&
+          r.dList.every(d => fullFilters.includes(d)));
+
+      dMatch = exactNums && exactFull;
+    } else {
+      // mode "avec-autres"
+      const numsOk = numFilters.every(fn =>
+        r.dList.some(d => d.includes(`D${fn}`))
+      );
+      const fullOk = fullFilters.every(ff => r.dList.includes(ff));
+
+      dMatch = numsOk && fullOk;
     }
-    
-    return villeMatch && dMatch;
-  });
+  }
+
+  return villeMatch && dMatch;
+});
+
 
   return (
     <div className="app-container">
       <h1>Gestion des Bureaux d'Études</h1>
-      
+
       <div className="file-upload">
         <label htmlFor="file-input" className="file-label">
           Choisir un fichier
@@ -120,10 +171,13 @@ const dOptions = Array.from(new Set(data.flatMap(r => r.dList))).sort((a, b) => 
           accept=".xlsx,.xls"
           onChange={handleFileUpload}
         />
-        {data.length > 0 && <span className="file-info">{data.length} entrées chargées</span>}
+        {data.length > 0 && (
+          <span className="file-info">{data.length} entrées chargées</span>
+        )}
       </div>
 
       <div className="filters-section">
+        {/* Filtres villes */}
         <div className="filter-group">
           <label>Villes</label>
           <div className="tags-container">
@@ -135,21 +189,39 @@ const dOptions = Array.from(new Set(data.flatMap(r => r.dList))).sort((a, b) => 
             ))}
           </div>
           <div className="options-list">
-            {villes.map(v => (
-              <button
-                key={v}
-                className={`option-btn ${villeFilters.includes(v) ? "active" : ""}`}
-                onClick={() => toggleVille(v)}
-              >
-                {v}
-              </button>
-            ))}
-          </div>
+  {/* Boutons All / Clear */}
+  <button
+    className="option-btn special-btn"
+    onClick={() => setVilleFilters(villes)}  // Tout
+  >
+    Toutes
+  </button>
+  <button
+    className="option-btn special-btn"
+    onClick={() => setVilleFilters([])}      // Effacer
+  >
+    Effacer
+  </button>
+
+  {villes.map(v => (
+    <button
+      key={v}
+      className={`option-btn ${
+        villeFilters.includes(v) ? "active" : ""
+      }`}
+      onClick={() => toggleVille(v)}
+    >
+      {v}
+    </button>
+  ))}
+</div>
+
         </div>
 
+        {/* Filtres D */}
         <div className="filter-group">
           <label>Catégories D</label>
-          
+
           <div className="filter-mode">
             <label className="radio-label">
               <input
@@ -159,7 +231,7 @@ const dOptions = Array.from(new Set(data.flatMap(r => r.dList))).sort((a, b) => 
                 checked={dFilterMode === "avec-autres"}
                 onChange={(e) => setDFilterMode(e.target.value)}
               />
-              <span>  Contient ces D + autres possibles</span>
+              <span> Contient ces D + autres possibles</span>
             </label>
             <label className="radio-label">
               <input
@@ -169,7 +241,7 @@ const dOptions = Array.from(new Set(data.flatMap(r => r.dList))).sort((a, b) => 
                 checked={dFilterMode === "exact"}
                 onChange={(e) => setDFilterMode(e.target.value)}
               />
-              <span>  Contient uniquement ces D</span>
+              <span> Contient uniquement ces D</span>
             </label>
           </div>
 
@@ -182,16 +254,33 @@ const dOptions = Array.from(new Set(data.flatMap(r => r.dList))).sort((a, b) => 
             ))}
           </div>
           <div className="options-list">
-            {dOptions.map(d => (
-              <button
-                key={d}
-                className={`option-btn ${dFilters.includes(d) ? "active" : ""}`}
-                onClick={() => toggleD(d)}
-              >
-                {d}
-              </button>
-            ))}
-          </div>
+  {/* Boutons All / Clear pour D */}
+  <button
+    className="option-btn special-btn"
+    onClick={() => setDFilters(dOptions)}   // sélectionner tous les D
+  >
+    Tous
+  </button>
+  <button
+    className="option-btn special-btn"
+    onClick={() => setDFilters([])}         // effacer
+  >
+    Effacer
+  </button>
+
+  {dOptions.map(d => (
+    <button
+      key={d}
+      className={`option-btn ${
+        dFilters.includes(d) ? "active" : ""
+      }`}
+      onClick={() => toggleD(d)}
+    >
+      {d}
+    </button>
+  ))}
+</div>
+
         </div>
       </div>
 
@@ -199,6 +288,7 @@ const dOptions = Array.from(new Set(data.flatMap(r => r.dList))).sort((a, b) => 
         <table>
           <thead>
             <tr>
+              <th>N°</th>
               <th>Titre</th>
               <th>Lieu</th>
               <th>Ville</th>
@@ -211,6 +301,7 @@ const dOptions = Array.from(new Set(data.flatMap(r => r.dList))).sort((a, b) => 
           <tbody>
             {filtered.map((r, i) => (
               <tr key={i}>
+                <td>{i + 1}</td>
                 <td>{r.titre}</td>
                 <td>{r.lieu}</td>
                 <td>{r.ville}</td>
